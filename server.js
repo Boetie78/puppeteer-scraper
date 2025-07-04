@@ -1,0 +1,202 @@
+const express = require('express');
+const puppeteer = require('puppeteer');
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
+const cors = require('cors');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// Middleware
+app.use(helmet());
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  message: { error: 'Too many requests' }
+});
+app.use('/api/', limiter);
+
+// Browser management
+let browserPool = [];
+const MAX_BROWSERS = 2;
+
+async function getBrowser() {
+  if (browserPool.length === 0) {
+    console.log('🚀 Starting browser...');
+    const browser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ]
+    });
+    return browser;
+  }
+  return browserPool.pop();
+}
+
+function releaseBrowser(browser) {
+  if (browserPool.length < MAX_BROWSERS) {
+    browserPool.push(browser);
+  } else {
+    browser.close().catch(console.error);
+  }
+}
+
+// Home page
+app.get('/', (req, res) => {
+  res.json({
+    message: '🚀 Puppeteer Scraper Service',
+    status: 'running',
+    endpoints: {
+      health: '/health',
+      scrape: '/api/scrape/social'
+    }
+  });
+});
+
+// Main scraping endpoint
+app.post('/api/scrape/social', async (req, res) => {
+  let browser;
+  const startTime = Date.now();
+  
+  try {
+    const { url, platform, businessName = 'Unknown Business' } = req.body;
+
+    if (!url || !platform) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'URL and platform are required' 
+      });
+    }
+
+    console.log(`🔍 Scraping ${platform}: ${url}`);
+
+    browser = await getBrowser();
+    const page = await browser.newPage();
+    
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    await page.setViewport({ width: 1366, height: 768 });
+    
+    // Block images to speed up
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+    
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    await page.waitForTimeout(3000);
+
+    // Extract data
+    const data = await page.evaluate((platform, businessName) => {
+      const bodyText = document.body.innerText;
+      const results = {
+        businessName,
+        platform: platform.charAt(0).toUpperCase() + platform.slice(1),
+        success: true,
+        pageInfo: {
+          title: document.title,
+          url: window.location.href
+        },
+        metrics: {}
+      };
+
+      function parseNumber(text) {
+        if (!text) return 0;
+        const cleanText = text.toLowerCase().replace(/,/g, '');
+        const match = cleanText.match(/(\d+(?:\.\d+)?)(k|m|b)?/);
+        if (match) {
+          const number = parseFloat(match[1]);
+          const suffix = match[2];
+          if (suffix === 'k') return Math.round(number * 1000);
+          if (suffix === 'm') return Math.round(number * 1000000);
+          if (suffix === 'b') return Math.round(number * 1000000000);
+          return Math.round(number);
+        }
+        return 0;
+      }
+
+      // Extract followers based on platform
+      switch (platform.toLowerCase()) {
+        case 'facebook':
+          const fbMatch = bodyText.match(/(\d+(?:[,\.]\d+)*[KMB]?)\s*(?:likes?|followers?)/gi);
+          if (fbMatch) {
+            results.metrics.followers = parseNumber(fbMatch[0].match(/(\d+(?:[,\.]\d+)*[KMB]?)/)[1]);
+          }
+          break;
+        case 'instagram':
+          const igMatch = bodyText.match(/(\d+(?:[,\.]\d+)*[KMB]?)\s*followers/i);
+          if (igMatch) {
+            results.metrics.followers = parseNumber(igMatch[1]);
+          }
+          break;
+        case 'linkedin':
+          const liMatch = bodyText.match(/(\d+(?:[,\.]\d+)*[KMB]?)\s*(?:connections?|followers?)/gi);
+          if (liMatch) {
+            results.metrics.connections = parseNumber(liMatch[0].match(/(\d+(?:[,\.]\d+)*[KMB]?)/)[1]);
+          }
+          break;
+        case 'youtube':
+          const ytMatch = bodyText.match(/(\d+(?:[,\.]\d+)*[KMB]?)\s*subscribers?/gi);
+          if (ytMatch) {
+            results.metrics.subscribers = parseNumber(ytMatch[0].match(/(\d+(?:[,\.]\d+)*[KMB]?)/)[1]);
+          }
+          break;
+      }
+
+      return results;
+    }, platform, businessName);
+
+    await page.close();
+    releaseBrowser(browser);
+
+    console.log(`✅ Completed in ${Date.now() - startTime}ms`);
+
+    res.json({
+      success: true,
+      data,
+      metadata: {
+        processingTimeMs: Date.now() - startTime,
+        scrapedAt: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    if (browser) {
+      try { await browser.close(); } catch (e) {}
+    }
+    
+    console.error(`❌ Error:`, error.message);
+    
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// Start server
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📊 Health: http://localhost:${PORT}/health`);
+  console.log(`🔧 API: http://localhost:${PORT}/api/scrape/social`);
+});

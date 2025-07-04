@@ -14,6 +14,7 @@
     "cross-fetch": "4.0.0",
     "debug": "4.4.1",
     "devtools-protocol": "0.0.1464554",
+    "express": "^5.1.0",
     "ieee754": "1.2.1",
     "mkdirp-classic": "0.5.3",
     "ms": "2.1.3",

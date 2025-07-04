@@ -11,6 +11,7 @@
     "base64-js": "1.5.1",
     "buffer": "5.7.1",
     "chromium-bidi": "5.1.0",
+    "cors": "^2.8.5",
     "cross-fetch": "4.0.0",
     "debug": "4.4.1",
     "devtools-protocol": "0.0.1464554",

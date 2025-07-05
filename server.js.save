@@ -1,3 +1,4 @@
+
 const express = require('express');
 const puppeteer = require('puppeteer');
 const rateLimit = require('express-rate-limit');
@@ -65,14 +66,14 @@ app.get('/', (req, res) => {
 app.post('/api/scrape/social', async (req, res) => {
   let browser;
   const startTime = Date.now();
-
+  
   try {
     const { url, platform, businessName = 'Unknown Business' } = req.body;
 
     if (!url || !platform) {
-      return res.status(400).json({
-        success: false,
-        error: 'URL and platform are required'
+      return res.status(400).json({ 
+        success: false, 
+        error: 'URL and platform are required' 
       });
     }
 
@@ -80,10 +81,10 @@ app.post('/api/scrape/social', async (req, res) => {
 
     browser = await getBrowser();
     const page = await browser.newPage();
-
+    
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     await page.setViewport({ width: 1366, height: 768 });
-
+    
     // Block images to speed up
     await page.setRequestInterception(true);
     page.on('request', (req) => {
@@ -93,10 +94,11 @@ app.post('/api/scrape/social', async (req, res) => {
         req.continue();
       }
     });
-
+    
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await page.waitForTimeout(3000);
 
+    // Extract data
     const data = await page.evaluate((platform, businessName) => {
       const bodyText = document.body.innerText;
       const results = {
@@ -174,9 +176,9 @@ app.post('/api/scrape/social', async (req, res) => {
     if (browser) {
       try { await browser.close(); } catch (e) {}
     }
-
+    
     console.error(`❌ Error:`, error.message);
-
+    
     res.status(500).json({
       success: false,
       error: error.message
@@ -186,8 +188,8 @@ app.post('/api/scrape/social', async (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
+  res.json({ 
+    status: 'healthy', 
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
   });

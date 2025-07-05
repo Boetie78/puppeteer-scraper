@@ -3,6 +3,7 @@ const puppeteer = require('puppeteer');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const cors = require('cors');
+require('dotenv').config(); // 🔐 Enable environment variable access
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -61,8 +62,13 @@ app.get('/', (req, res) => {
   });
 });
 
-// Main scraping endpoint
+// 🔐 Main scraping endpoint with API Key check
 app.post('/api/scrape/social', async (req, res) => {
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey !== process.env.API_KEY) {
+    return res.status(403).json({ success: false, message: 'Forbidden: Invalid API Key' });
+  }
+
   let browser;
   const startTime = Date.now();
 
@@ -84,7 +90,6 @@ app.post('/api/scrape/social', async (req, res) => {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     await page.setViewport({ width: 1366, height: 768 });
 
-    // Block images to speed up
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
@@ -125,7 +130,6 @@ app.post('/api/scrape/social', async (req, res) => {
         return 0;
       }
 
-      // Extract followers based on platform
       switch (platform.toLowerCase()) {
         case 'facebook':
           const fbMatch = bodyText.match(/(\d+(?:[,\.]\d+)*[KMB]?)\s*(?:likes?|followers?)/gi);
@@ -193,7 +197,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Start server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Health: http://localhost:${PORT}/health`);
